@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  LayoutDashboard, 
-  FlaskConical, 
-  CheckCircle2, 
-  Settings, 
-  Table, 
-  Plus, 
-  AlertTriangle, 
-  Check, 
-  X, 
+import {
+  LayoutDashboard,
+  FlaskConical,
+  CheckCircle2,
+  Settings,
+  Table,
+  Plus,
+  AlertTriangle,
+  Check,
+  X,
   FileText,
   User,
   Cpu,
@@ -31,44 +31,22 @@ import {
   Monitor,
   Gamepad2
 } from 'lucide-react';
-import { initializeApp } from 'firebase/app';
-import { 
-  getFirestore, 
-  collection, 
-  doc, 
-  setDoc, 
-  getDoc, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc, 
-  onSnapshot, 
-  query 
-} from 'firebase/firestore';
-import { 
-  getAuth, 
-  signInWithCustomToken, 
-  signInAnonymously, 
-  onAuthStateChanged 
-} from 'firebase/auth';
 
-// --- Firebase Configuration ---
-// PLATFORM NOTE: Config is provided automatically here.
-// LOCAL HOST NOTE: Replace the object values below with your actual Firebase API keys.
-const firebaseConfig = typeof __firebase_config !== 'undefined' 
-  ? JSON.parse(__firebase_config) 
-  : {
-      apiKey: "REPLACE_WITH_YOUR_API_KEY",
-      authDomain: "REPLACE_WITH_YOUR_PROJECT.firebaseapp.com",
-      projectId: "REPLACE_WITH_YOUR_PROJECT_ID",
-      storageBucket: "REPLACE_WITH_YOUR_PROJECT.appspot.com",
-      messagingSenderId: "REPLACE_WITH_YOUR_SENDER_ID",
-      appId: "REPLACE_WITH_YOUR_APP_ID"
-    };
+// --- LocalStorage Helpers ---
+const STORAGE_KEYS = { versions: 'pluto_versions', tests: 'pluto_tests' };
 
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'pluto-ecosystem-local';
+const loadData = (key) => {
+  try {
+    const data = localStorage.getItem(key);
+    return data ? JSON.parse(data) : [];
+  } catch { return []; }
+};
+
+const saveData = (key, data) => {
+  localStorage.setItem(key, JSON.stringify(data));
+};
+
+const generateId = () => Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
 
 // --- Constants & Enums ---
 const CATEGORIES = {
@@ -82,11 +60,26 @@ const CATEGORIES = {
 };
 
 const TEST_STATUS = {
-  DRAFT: 'DRAFT',           
-  SUBMITTED: 'SUBMITTED',   
-  APPROVED: 'APPROVED',     
-  REJECTED: 'REJECTED'      
+  DRAFT: 'DRAFT',
+  SUBMITTED: 'SUBMITTED',
+  APPROVED: 'APPROVED',
+  REJECTED: 'REJECTED'
 };
+
+const SEED_DATA = [
+  { name: 'Primus V5', category: CATEGORIES.HARDWARE, type: 'Current' },
+  { name: 'Primus X2', category: CATEGORIES.HARDWARE, type: 'Current' },
+  { name: 'Primus X2 V1', category: CATEGORIES.HARDWARE, type: 'Legacy' },
+  { name: 'Primus V5 V1', category: CATEGORIES.HARDWARE, type: 'Legacy' },
+  { name: 'Primus V4', category: CATEGORIES.HARDWARE, type: 'Legacy' },
+  { name: 'Primus X', category: CATEGORIES.HARDWARE, type: 'Legacy' },
+  { name: '3.0.0', category: CATEGORIES.FIRMWARE, isReleased: true },
+  { name: '3.0.2', category: CATEGORIES.IDE },
+  { name: '1.1', category: CATEGORIES.JOYSTICK },
+  { name: '4.1.1', category: CATEGORIES.BLOCKS },
+  { name: '16.4.4', category: CATEGORIES.ANDROID },
+  { name: '5.0.3', category: CATEGORIES.IOS },
+];
 
 // --- UI Components ---
 const Card = ({ children, className = "" }) => (
@@ -112,79 +105,32 @@ const Badge = ({ children, variant = "default" }) => {
 };
 
 export default function App() {
-  const [user, setUser] = useState(null);
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [versions, setVersions] = useState([]);
   const [tests, setTests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [notification, setNotification] = useState(null);
 
-  // --- Auth & Data Initialization ---
+  // --- Data Initialization ---
   useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (error) {
-        console.error("Authentication error:", error);
-      }
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, setUser);
-    return () => unsubscribe();
+    let storedVersions = loadData(STORAGE_KEYS.versions);
+    if (storedVersions.length === 0) {
+      storedVersions = SEED_DATA.map(item => ({ id: generateId(), ...item }));
+      saveData(STORAGE_KEYS.versions, storedVersions);
+    }
+    setVersions(storedVersions);
+    setTests(loadData(STORAGE_KEYS.tests));
+    setLoading(false);
   }, []);
 
+  // Persist to localStorage whenever data changes
   useEffect(() => {
-    if (!user) return;
+    if (!loading) saveData(STORAGE_KEYS.versions, versions);
+  }, [versions, loading]);
 
-    // Use mandatory paths for Firestore collections
-    const vRef = collection(db, 'artifacts', appId, 'public', 'data', 'versions');
-    const tRef = collection(db, 'artifacts', appId, 'public', 'data', 'tests');
-
-    const unsubV = onSnapshot(vRef, (snap) => {
-      const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setVersions(data);
-      if (data.length === 0) seedData();
-      setLoading(false);
-    }, (err) => console.error("Error fetching versions:", err));
-
-    const unsubT = onSnapshot(tRef, (snap) => {
-      const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setTests(data);
-    }, (err) => console.error("Error fetching tests:", err));
-
-    return () => { unsubV(); unsubT(); };
-  }, [user]);
-
-  const seedData = async () => {
-    const initial = [
-      // Hardware Models
-      { name: 'Primus V5', category: CATEGORIES.HARDWARE, type: 'Current' },
-      { name: 'Primus X2', category: CATEGORIES.HARDWARE, type: 'Current' },
-      { name: 'Primus X2 V1', category: CATEGORIES.HARDWARE, type: 'Legacy' },
-      { name: 'Primus V5 V1', category: CATEGORIES.HARDWARE, type: 'Legacy' },
-      { name: 'Primus V4', category: CATEGORIES.HARDWARE, type: 'Legacy' },
-      { name: 'Primus X', category: CATEGORIES.HARDWARE, type: 'Legacy' },
-      
-      // Latest Firmware Build
-      { name: '3.0.0', category: CATEGORIES.FIRMWARE, isReleased: true },
-      
-      // Development & Support Tools
-      { name: '3.0.2', category: CATEGORIES.IDE },
-      { name: '1.1', category: CATEGORIES.JOYSTICK },
-      { name: '4.1.1', category: CATEGORIES.BLOCKS },
-      
-      // Mobile Ecosystem
-      { name: '16.4.4', category: CATEGORIES.ANDROID },
-      { name: '5.0.3', category: CATEGORIES.IOS },
-    ];
-    for (const item of initial) {
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'versions'), item);
-    }
-  };
+  useEffect(() => {
+    if (!loading) saveData(STORAGE_KEYS.tests, tests);
+  }, [tests, loading]);
 
   const showNotify = (msg) => {
     setNotification(msg);
@@ -197,12 +143,12 @@ export default function App() {
     return [...items].sort((a,b) => b.name.localeCompare(a.name, undefined, {numeric: true}))[0].name;
   };
 
-  // --- Database Actions ---
-  const addVersion = async (name, category) => {
-    const vRef = collection(db, 'artifacts', appId, 'public', 'data', 'versions');
-    const docRef = await addDoc(vRef, { name, category, isReleased: false });
-    
-    // Automation: New Firmware triggers tests across all hardware
+  // --- Data Actions ---
+  const addVersion = (name, category) => {
+    const newVersion = { id: generateId(), name, category, isReleased: false };
+    const updated = [...versions, newVersion];
+    setVersions(updated);
+
     if (category === CATEGORIES.FIRMWARE) {
       const hardware = versions.filter(v => v.category === CATEGORIES.HARDWARE);
       const currentStack = {
@@ -212,60 +158,63 @@ export default function App() {
         ide: getLatest(CATEGORIES.IDE),
         joystick: getLatest(CATEGORIES.JOYSTICK)
       };
-
-      for (const hw of hardware) {
-        await createTestCombination({ 
-          hardware: hw.name, 
-          firmware: name, 
-          ...currentStack,
-          isAutoGenerated: true 
-        });
-      }
+      const newTests = hardware.map(hw => ({
+        id: generateId(),
+        hardware: hw.name,
+        firmware: name,
+        ...currentStack,
+        isAutoGenerated: true,
+        status: TEST_STATUS.DRAFT,
+        createdAt: new Date().toISOString(),
+        result: null,
+        notes: '',
+        tester: ''
+      }));
+      setTests(prev => [...prev, ...newTests]);
       showNotify(`Firmware ${name} staged. Matrix verification required.`);
     } else {
       showNotify(`Registered ${name} to ${category}.`);
     }
-    return docRef;
   };
 
-  const markFirmwareReleased = async (id) => {
-    const vRef = doc(db, 'artifacts', appId, 'public', 'data', 'versions', id);
-    await updateDoc(vRef, { isReleased: true });
+  const markFirmwareReleased = (id) => {
+    setVersions(prev => prev.map(v => v.id === id ? { ...v, isReleased: true } : v));
     showNotify("Ecosystem status updated to Released.");
   };
 
-  const createTestCombination = async (data) => {
-    const tRef = collection(db, 'artifacts', appId, 'public', 'data', 'tests');
-    await addDoc(tRef, {
+  const createTestCombination = (data) => {
+    const newTest = {
+      id: generateId(),
       ...data,
       status: TEST_STATUS.DRAFT,
       createdAt: new Date().toISOString(),
       result: null,
-      notes: '',
+      notes: data.notes || '',
       tester: ''
-    });
+    };
+    setTests(prev => [...prev, newTest]);
   };
 
-  const submitTestResult = async (id, result, notes, tester, stack) => {
-    const tRef = doc(db, 'artifacts', appId, 'public', 'data', 'tests', id);
-    await updateDoc(tRef, {
-      result,
-      notes,
-      tester,
-      ...stack,
+  const submitTestResult = (id, result, notes, tester, stack) => {
+    setTests(prev => prev.map(t => t.id === id ? {
+      ...t, result, notes, tester, ...stack,
       status: TEST_STATUS.SUBMITTED,
       submittedAt: new Date().toISOString()
-    });
+    } : t));
     showNotify("Laboratory findings submitted for signoff.");
   };
 
-  const approveTest = async (id, approve = true) => {
-    const tRef = doc(db, 'artifacts', appId, 'public', 'data', 'tests', id);
-    await updateDoc(tRef, {
+  const approveTest = (id, approve = true) => {
+    setTests(prev => prev.map(t => t.id === id ? {
+      ...t,
       status: approve ? TEST_STATUS.APPROVED : TEST_STATUS.REJECTED,
       approvedAt: new Date().toISOString()
-    });
+    } : t));
     showNotify(approve ? "Matrix Updated." : "Result Rejected.");
+  };
+
+  const deleteVersion = (id) => {
+    setVersions(prev => prev.filter(v => v.id !== id));
   };
 
   // --- UI Views ---
@@ -277,7 +226,7 @@ export default function App() {
         </div>
         <span className="font-black text-xl tracking-tighter uppercase">Pluto Eco</span>
       </div>
-      
+
       <div className="space-y-8 flex-1">
         <div>
           <p className="px-4 text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3 opacity-60">Customer Ops</p>
@@ -310,10 +259,10 @@ export default function App() {
           </nav>
         </div>
       </div>
-      
+
       <div className="pt-6 border-t border-slate-800 flex items-center gap-3">
         <div className="text-[10px] font-bold text-slate-500">
-          SYSTEM NODE: {user?.uid.slice(0, 8)}
+          LOCAL MODE
         </div>
       </div>
     </div>
@@ -325,34 +274,34 @@ export default function App() {
     const [showQuickAdd, setShowQuickAdd] = useState(false);
     const [newDeviceName, setNewDeviceName] = useState("");
 
-    const handleQuickAdd = async () => {
+    const handleQuickAdd = () => {
       if (!newDeviceName) return;
-      await addVersion(newDeviceName, CATEGORIES.HARDWARE);
+      addVersion(newDeviceName, CATEGORIES.HARDWARE);
       setQuery({...query, hardware: newDeviceName});
       setNewDeviceName("");
       setShowQuickAdd(false);
     };
 
-    const handleRequestTest = async () => {
+    const handleRequestTest = () => {
       if (!query.hardware || !query.firmware) return;
-      await createTestCombination({ 
-        hardware: query.hardware, 
-        firmware: query.firmware, 
+      createTestCombination({
+        hardware: query.hardware,
+        firmware: query.firmware,
         android: query.android,
         blocks: query.blocks,
-        notes: `Customer issue reported. Escalated from Diagnostic Suite.` 
+        notes: `Customer issue reported. Escalated from Diagnostic Suite.`
       });
       showNotify("Verification request pushed to Lab Queue.");
     };
 
     const runCheck = () => {
       const hwTests = tests.filter(t => t.hardware === query.hardware && t.status === TEST_STATUS.APPROVED);
-      
+
       if (hwTests.length === 0) {
-        setResult({ 
-          status: 'NOT_VERIFIED', 
-          message: 'Zero compatibility data found for this board.', 
-          resolution: 'Action: Escalate to engineering for manual verification.' 
+        setResult({
+          status: 'NOT_VERIFIED',
+          message: 'Zero compatibility data found for this board.',
+          resolution: 'Action: Escalate to engineering for manual verification.'
         });
         return;
       }
@@ -363,7 +312,7 @@ export default function App() {
         const stackIssues = [];
         if (query.android && fwMatch.android && query.android !== fwMatch.android) stackIssues.push(`Android version mismatch (Verified: ${fwMatch.android})`);
         if (query.blocks && fwMatch.blocks && query.blocks !== fwMatch.blocks) stackIssues.push(`PlutoBlocks mismatch (Verified: ${fwMatch.blocks})`);
-        
+
         if (stackIssues.length > 0) {
           setResult({
             status: 'UNTESTED_STACK',
@@ -372,28 +321,28 @@ export default function App() {
             details: stackIssues
           });
         } else {
-          setResult({ 
-            status: 'COMPATIBLE', 
-            message: 'Complete configuration is verified and supported.', 
-            resolution: 'Status: Officially verified build. Proceed with support.' 
+          setResult({
+            status: 'COMPATIBLE',
+            message: 'Complete configuration is verified and supported.',
+            resolution: 'Status: Officially verified build. Proceed with support.'
           });
         }
         return;
       }
 
       const latestApproved = [...hwTests].sort((a,b) => b.firmware.localeCompare(a.firmware, undefined, {numeric: true}))[0];
-      
+
       if (query.firmware < latestApproved.firmware) {
-        setResult({ 
-          status: 'UPGRADE_REQUIRED', 
-          message: 'The firmware version is outdated.', 
-          resolution: `Resolution: Upgrade drone to Magis ${latestApproved.firmware} for stable operation.` 
+        setResult({
+          status: 'UPGRADE_REQUIRED',
+          message: 'The firmware version is outdated.',
+          resolution: `Resolution: Upgrade drone to Magis ${latestApproved.firmware} for stable operation.`
         });
       } else {
-        setResult({ 
-          status: 'NOT_VERIFIED', 
-          message: 'Combination not yet tested in the lab.', 
-          resolution: 'Action: Trigger an engineering validation request.' 
+        setResult({
+          status: 'NOT_VERIFIED',
+          message: 'Combination not yet tested in the lab.',
+          resolution: 'Action: Trigger an engineering validation request.'
         });
       }
     };
@@ -478,7 +427,7 @@ export default function App() {
                     {result.status === 'UNTESTED_STACK' && <Info size={36} className="text-blue-500" />}
                     {result.status === 'NOT_VERIFIED' && <AlertTriangle size={36} className="text-rose-500" />}
                   </div>
-                  
+
                   <div>
                     <Badge variant={result.status === 'COMPATIBLE' ? 'success' : result.status === 'UPGRADE_REQUIRED' ? 'warning' : result.status === 'UNTESTED_STACK' ? 'info' : 'danger'}>
                       {result.status.replace('_', ' ')}
@@ -539,7 +488,7 @@ export default function App() {
               </div>
               <button onClick={() => setActiveTest(null)} className="p-2 hover:bg-slate-100 rounded-full"><X size={24}/></button>
             </header>
-            
+
             <div className="p-5 bg-slate-900 text-white rounded-xl flex justify-between items-center shadow-lg">
               <div>
                 <p className="text-[10px] font-black uppercase opacity-50 tracking-widest">Configuration</p>
@@ -858,7 +807,7 @@ export default function App() {
       <main className="flex-1 overflow-y-auto p-12 relative">
         {notification && (
           <div className="fixed top-8 right-8 z-50 animate-in slide-in-from-top-4 bg-slate-900 text-white px-10 py-5 rounded-2xl shadow-2xl flex items-center gap-5 border border-slate-700">
-            <CheckCircle2 size={24} className="text-emerald-400" /> 
+            <CheckCircle2 size={24} className="text-emerald-400" />
             <span className="text-sm font-black tracking-tight">{notification}</span>
           </div>
         )}
@@ -908,7 +857,7 @@ export default function App() {
                              {cat === CATEGORIES.FIRMWARE && (
                                v.isReleased ? <Badge variant="success">Official</Badge> : <Badge variant="warning">Staging</Badge>
                              )}
-                             <button onClick={async () => await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'versions', v.id))} className="text-slate-200 hover:text-rose-500 p-2 opacity-0 group-hover:opacity-100 transition-all">
+                             <button onClick={() => deleteVersion(v.id)} className="text-slate-200 hover:text-rose-500 p-2 opacity-0 group-hover:opacity-100 transition-all">
                                <X size={16}/>
                              </button>
                           </div>
