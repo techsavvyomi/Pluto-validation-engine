@@ -1,0 +1,927 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  LayoutDashboard, 
+  FlaskConical, 
+  CheckCircle2, 
+  Settings, 
+  Table, 
+  Plus, 
+  AlertTriangle, 
+  Check, 
+  X, 
+  FileText,
+  User,
+  Cpu,
+  Smartphone,
+  Layers,
+  Search,
+  ChevronRight,
+  ClipboardList,
+  History,
+  ShieldCheck,
+  LifeBuoy,
+  Rocket,
+  ArrowUpCircle,
+  Ban,
+  Info,
+  Activity,
+  Zap,
+  PlusCircle,
+  Send,
+  Monitor,
+  Gamepad2
+} from 'lucide-react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getFirestore, 
+  collection, 
+  doc, 
+  setDoc, 
+  getDoc, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  onSnapshot, 
+  query 
+} from 'firebase/firestore';
+import { 
+  getAuth, 
+  signInWithCustomToken, 
+  signInAnonymously, 
+  onAuthStateChanged 
+} from 'firebase/auth';
+
+// --- Firebase Configuration ---
+// PLATFORM NOTE: Config is provided automatically here.
+// LOCAL HOST NOTE: Replace the object values below with your actual Firebase API keys.
+const firebaseConfig = typeof __firebase_config !== 'undefined' 
+  ? JSON.parse(__firebase_config) 
+  : {
+      apiKey: "REPLACE_WITH_YOUR_API_KEY",
+      authDomain: "REPLACE_WITH_YOUR_PROJECT.firebaseapp.com",
+      projectId: "REPLACE_WITH_YOUR_PROJECT_ID",
+      storageBucket: "REPLACE_WITH_YOUR_PROJECT.appspot.com",
+      messagingSenderId: "REPLACE_WITH_YOUR_SENDER_ID",
+      appId: "REPLACE_WITH_YOUR_APP_ID"
+    };
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'pluto-ecosystem-local';
+
+// --- Constants & Enums ---
+const CATEGORIES = {
+  HARDWARE: 'Flight Controller Hardware',
+  FIRMWARE: 'Firmware (Magis)',
+  ANDROID: 'Pluto Controller Android',
+  IOS: 'Pluto Controller iOS',
+  BLOCKS: 'PlutoBlocks',
+  IDE: 'PlutoIDE',
+  JOYSTICK: 'Pluto Joystick Controller'
+};
+
+const TEST_STATUS = {
+  DRAFT: 'DRAFT',           
+  SUBMITTED: 'SUBMITTED',   
+  APPROVED: 'APPROVED',     
+  REJECTED: 'REJECTED'      
+};
+
+// --- UI Components ---
+const Card = ({ children, className = "" }) => (
+  <div className={`bg-white rounded-xl border border-slate-200 shadow-sm ${className}`}>
+    {children}
+  </div>
+);
+
+const Badge = ({ children, variant = "default" }) => {
+  const styles = {
+    default: "bg-slate-100 text-slate-700",
+    success: "bg-emerald-100 text-emerald-700",
+    danger: "bg-rose-100 text-rose-700",
+    warning: "bg-amber-100 text-amber-700",
+    info: "bg-blue-100 text-blue-700",
+    purple: "bg-purple-100 text-purple-700",
+  };
+  return (
+    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${styles[variant]}`}>
+      {children}
+    </span>
+  );
+};
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [currentPage, setCurrentPage] = useState('dashboard');
+  const [versions, setVersions] = useState([]);
+  const [tests, setTests] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [notification, setNotification] = useState(null);
+
+  // --- Auth & Data Initialization ---
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (error) {
+        console.error("Authentication error:", error);
+      }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, setUser);
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+
+    // Use mandatory paths for Firestore collections
+    const vRef = collection(db, 'artifacts', appId, 'public', 'data', 'versions');
+    const tRef = collection(db, 'artifacts', appId, 'public', 'data', 'tests');
+
+    const unsubV = onSnapshot(vRef, (snap) => {
+      const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setVersions(data);
+      if (data.length === 0) seedData();
+      setLoading(false);
+    }, (err) => console.error("Error fetching versions:", err));
+
+    const unsubT = onSnapshot(tRef, (snap) => {
+      const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setTests(data);
+    }, (err) => console.error("Error fetching tests:", err));
+
+    return () => { unsubV(); unsubT(); };
+  }, [user]);
+
+  const seedData = async () => {
+    const initial = [
+      // Hardware Models
+      { name: 'Primus V5', category: CATEGORIES.HARDWARE, type: 'Current' },
+      { name: 'Primus X2', category: CATEGORIES.HARDWARE, type: 'Current' },
+      { name: 'Primus X2 V1', category: CATEGORIES.HARDWARE, type: 'Legacy' },
+      { name: 'Primus V5 V1', category: CATEGORIES.HARDWARE, type: 'Legacy' },
+      { name: 'Primus V4', category: CATEGORIES.HARDWARE, type: 'Legacy' },
+      { name: 'Primus X', category: CATEGORIES.HARDWARE, type: 'Legacy' },
+      
+      // Latest Firmware Build
+      { name: '3.0.0', category: CATEGORIES.FIRMWARE, isReleased: true },
+      
+      // Development & Support Tools
+      { name: '3.0.2', category: CATEGORIES.IDE },
+      { name: '1.1', category: CATEGORIES.JOYSTICK },
+      { name: '4.1.1', category: CATEGORIES.BLOCKS },
+      
+      // Mobile Ecosystem
+      { name: '16.4.4', category: CATEGORIES.ANDROID },
+      { name: '5.0.3', category: CATEGORIES.IOS },
+    ];
+    for (const item of initial) {
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'versions'), item);
+    }
+  };
+
+  const showNotify = (msg) => {
+    setNotification(msg);
+    setTimeout(() => setNotification(null), 3000);
+  };
+
+  const getLatest = (category) => {
+    const items = versions.filter(v => v.category === category);
+    if (items.length === 0) return '';
+    return [...items].sort((a,b) => b.name.localeCompare(a.name, undefined, {numeric: true}))[0].name;
+  };
+
+  // --- Database Actions ---
+  const addVersion = async (name, category) => {
+    const vRef = collection(db, 'artifacts', appId, 'public', 'data', 'versions');
+    const docRef = await addDoc(vRef, { name, category, isReleased: false });
+    
+    // Automation: New Firmware triggers tests across all hardware
+    if (category === CATEGORIES.FIRMWARE) {
+      const hardware = versions.filter(v => v.category === CATEGORIES.HARDWARE);
+      const currentStack = {
+        android: getLatest(CATEGORIES.ANDROID),
+        ios: getLatest(CATEGORIES.IOS),
+        blocks: getLatest(CATEGORIES.BLOCKS),
+        ide: getLatest(CATEGORIES.IDE),
+        joystick: getLatest(CATEGORIES.JOYSTICK)
+      };
+
+      for (const hw of hardware) {
+        await createTestCombination({ 
+          hardware: hw.name, 
+          firmware: name, 
+          ...currentStack,
+          isAutoGenerated: true 
+        });
+      }
+      showNotify(`Firmware ${name} staged. Matrix verification required.`);
+    } else {
+      showNotify(`Registered ${name} to ${category}.`);
+    }
+    return docRef;
+  };
+
+  const markFirmwareReleased = async (id) => {
+    const vRef = doc(db, 'artifacts', appId, 'public', 'data', 'versions', id);
+    await updateDoc(vRef, { isReleased: true });
+    showNotify("Ecosystem status updated to Released.");
+  };
+
+  const createTestCombination = async (data) => {
+    const tRef = collection(db, 'artifacts', appId, 'public', 'data', 'tests');
+    await addDoc(tRef, {
+      ...data,
+      status: TEST_STATUS.DRAFT,
+      createdAt: new Date().toISOString(),
+      result: null,
+      notes: '',
+      tester: ''
+    });
+  };
+
+  const submitTestResult = async (id, result, notes, tester, stack) => {
+    const tRef = doc(db, 'artifacts', appId, 'public', 'data', 'tests', id);
+    await updateDoc(tRef, {
+      result,
+      notes,
+      tester,
+      ...stack,
+      status: TEST_STATUS.SUBMITTED,
+      submittedAt: new Date().toISOString()
+    });
+    showNotify("Laboratory findings submitted for signoff.");
+  };
+
+  const approveTest = async (id, approve = true) => {
+    const tRef = doc(db, 'artifacts', appId, 'public', 'data', 'tests', id);
+    await updateDoc(tRef, {
+      status: approve ? TEST_STATUS.APPROVED : TEST_STATUS.REJECTED,
+      approvedAt: new Date().toISOString()
+    });
+    showNotify(approve ? "Matrix Updated." : "Result Rejected.");
+  };
+
+  // --- UI Views ---
+  const Sidebar = () => (
+    <div className="w-64 bg-slate-900 text-slate-400 p-6 flex flex-col h-full border-r border-slate-800">
+      <div className="flex items-center gap-3 text-white mb-12">
+        <div className="bg-blue-600 p-2 rounded-lg shadow-lg shadow-blue-500/20">
+          <Zap size={22} fill="currentColor" />
+        </div>
+        <span className="font-black text-xl tracking-tighter uppercase">Pluto Eco</span>
+      </div>
+      
+      <div className="space-y-8 flex-1">
+        <div>
+          <p className="px-4 text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3 opacity-60">Customer Ops</p>
+          <nav className="space-y-1">
+            {[
+              { id: 'dashboard', icon: LayoutDashboard, label: 'Overview' },
+              { id: 'support', icon: LifeBuoy, label: 'Diagnostic Tool' },
+              { id: 'matrix', icon: Table, label: 'Compatibility Matrix' },
+            ].map(item => (
+              <button key={item.id} onClick={() => setCurrentPage(item.id)} className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-bold transition-all ${currentPage === item.id ? 'bg-slate-800 text-white shadow-lg border border-slate-700' : 'hover:bg-slate-800/50 hover:text-slate-200'}`}>
+                <item.icon size={18} /> {item.label}
+              </button>
+            ))}
+          </nav>
+        </div>
+
+        <div>
+          <p className="px-4 text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3 opacity-60">Engineering Admin</p>
+          <nav className="space-y-1">
+            {[
+              { id: 'manage', icon: Settings, label: 'Asset Management' },
+              { id: 'submit', icon: FlaskConical, label: 'Lab Test Queue' },
+              { id: 'approval', icon: ShieldCheck, label: 'Signoff Pipeline' },
+              { id: 'release', icon: Rocket, label: 'Release Guard' },
+            ].map(item => (
+              <button key={item.id} onClick={() => setCurrentPage(item.id)} className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-bold transition-all ${currentPage === item.id ? 'bg-blue-600 text-white shadow-xl shadow-blue-500/20' : 'hover:bg-slate-800/50 hover:text-slate-200'}`}>
+                <item.icon size={18} /> {item.label}
+              </button>
+            ))}
+          </nav>
+        </div>
+      </div>
+      
+      <div className="pt-6 border-t border-slate-800 flex items-center gap-3">
+        <div className="text-[10px] font-bold text-slate-500">
+          SYSTEM NODE: {user?.uid.slice(0, 8)}
+        </div>
+      </div>
+    </div>
+  );
+
+  const SupportView = () => {
+    const [query, setQuery] = useState({ hardware: '', firmware: '', android: '', ios: '', blocks: '', ide: '', joystick: '' });
+    const [result, setResult] = useState(null);
+    const [showQuickAdd, setShowQuickAdd] = useState(false);
+    const [newDeviceName, setNewDeviceName] = useState("");
+
+    const handleQuickAdd = async () => {
+      if (!newDeviceName) return;
+      await addVersion(newDeviceName, CATEGORIES.HARDWARE);
+      setQuery({...query, hardware: newDeviceName});
+      setNewDeviceName("");
+      setShowQuickAdd(false);
+    };
+
+    const handleRequestTest = async () => {
+      if (!query.hardware || !query.firmware) return;
+      await createTestCombination({ 
+        hardware: query.hardware, 
+        firmware: query.firmware, 
+        android: query.android,
+        blocks: query.blocks,
+        notes: `Customer issue reported. Escalated from Diagnostic Suite.` 
+      });
+      showNotify("Verification request pushed to Lab Queue.");
+    };
+
+    const runCheck = () => {
+      const hwTests = tests.filter(t => t.hardware === query.hardware && t.status === TEST_STATUS.APPROVED);
+      
+      if (hwTests.length === 0) {
+        setResult({ 
+          status: 'NOT_VERIFIED', 
+          message: 'Zero compatibility data found for this board.', 
+          resolution: 'Action: Escalate to engineering for manual verification.' 
+        });
+        return;
+      }
+
+      const fwMatch = hwTests.find(t => t.firmware === query.firmware);
+
+      if (fwMatch) {
+        const stackIssues = [];
+        if (query.android && fwMatch.android && query.android !== fwMatch.android) stackIssues.push(`Android version mismatch (Verified: ${fwMatch.android})`);
+        if (query.blocks && fwMatch.blocks && query.blocks !== fwMatch.blocks) stackIssues.push(`PlutoBlocks mismatch (Verified: ${fwMatch.blocks})`);
+        
+        if (stackIssues.length > 0) {
+          setResult({
+            status: 'UNTESTED_STACK',
+            message: 'Firmware compatible, but toolchain versions differ from verified baseline.',
+            resolution: `Resolution: Suggest updating tools to the verified versions: Android ${fwMatch.android || 'Any'}, Blocks ${fwMatch.blocks || 'Any'}.`,
+            details: stackIssues
+          });
+        } else {
+          setResult({ 
+            status: 'COMPATIBLE', 
+            message: 'Complete configuration is verified and supported.', 
+            resolution: 'Status: Officially verified build. Proceed with support.' 
+          });
+        }
+        return;
+      }
+
+      const latestApproved = [...hwTests].sort((a,b) => b.firmware.localeCompare(a.firmware, undefined, {numeric: true}))[0];
+      
+      if (query.firmware < latestApproved.firmware) {
+        setResult({ 
+          status: 'UPGRADE_REQUIRED', 
+          message: 'The firmware version is outdated.', 
+          resolution: `Resolution: Upgrade drone to Magis ${latestApproved.firmware} for stable operation.` 
+        });
+      } else {
+        setResult({ 
+          status: 'NOT_VERIFIED', 
+          message: 'Combination not yet tested in the lab.', 
+          resolution: 'Action: Trigger an engineering validation request.' 
+        });
+      }
+    };
+
+    return (
+      <div className="max-w-5xl mx-auto space-y-6">
+        <header className="flex justify-between items-center">
+          <div>
+            <h1 className="text-2xl font-bold">Diagnostic Suite</h1>
+            <p className="text-slate-500 text-sm">Full-stack compatibility analysis for customer support.</p>
+          </div>
+          <button onClick={() => setShowQuickAdd(!showQuickAdd)} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold hover:bg-slate-200 flex items-center gap-2">
+            <PlusCircle size={16} /> New Hardware Model
+          </button>
+        </header>
+
+        {showQuickAdd && (
+          <Card className="p-4 bg-blue-50 border-blue-200 animate-in slide-in-from-top-4">
+             <div className="flex gap-4 items-end">
+                <div className="flex-1 space-y-1">
+                  <label className="text-[10px] font-black uppercase text-blue-500">New Device Name</label>
+                  <input className="w-full p-2 border rounded-lg bg-white outline-none" placeholder="e.g. Primus V7" value={newDeviceName} onChange={e => setNewDeviceName(e.target.value)} />
+                </div>
+                <button onClick={handleQuickAdd} className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold text-sm">Register</button>
+             </div>
+          </Card>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <Card className="p-8 lg:col-span-2 space-y-8 shadow-xl">
+            <div className="space-y-4">
+               <h3 className="text-xs font-black uppercase text-slate-400 tracking-widest border-b pb-2 flex items-center gap-2">
+                 <Cpu size={14} /> Step 1: Core Setup
+               </h3>
+               <div className="grid grid-cols-2 gap-6">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-600">Hardware Model</label>
+                  <select className="w-full p-3 border rounded-xl text-sm bg-slate-50 outline-none" value={query.hardware} onChange={e => setQuery({...query, hardware: e.target.value})}>
+                    <option value="">Select Board...</option>
+                    {versions.filter(v => v.category === CATEGORIES.HARDWARE).map(v => <option key={v.id}>{v.name}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-600">Firmware Build</label>
+                  <input type="text" placeholder="e.g. 3.0.0" className="w-full p-3 border rounded-xl text-sm outline-none" value={query.firmware} onChange={e => setQuery({...query, firmware: e.target.value})} />
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+               <h3 className="text-xs font-black uppercase text-slate-400 tracking-widest border-b pb-2 flex items-center gap-2">
+                 <Smartphone size={14} /> Step 2: Customer Tooling
+               </h3>
+               <div className="grid grid-cols-2 gap-6">
+                 <div className="space-y-1">
+                   <label className="text-[10px] font-bold text-slate-500 uppercase">Android/iOS App</label>
+                   <input type="text" placeholder="App Version" className="w-full p-3 border rounded-xl text-sm" value={query.android} onChange={e => setQuery({...query, android: e.target.value})} />
+                 </div>
+                 <div className="space-y-1">
+                   <label className="text-[10px] font-bold text-slate-500 uppercase">PlutoBlocks</label>
+                   <input type="text" placeholder="Block Version" className="w-full p-3 border rounded-xl text-sm" value={query.blocks} onChange={e => setQuery({...query, blocks: e.target.value})} />
+                 </div>
+               </div>
+            </div>
+
+            <button onClick={runCheck} disabled={!query.hardware || !query.firmware} className="w-full py-4 bg-slate-900 text-white font-black rounded-xl hover:bg-slate-800 disabled:opacity-50 transition-all uppercase text-xs tracking-widest">Run Diagnostic Scan</button>
+          </Card>
+
+          <div className="space-y-4">
+            <h3 className="text-xs font-black uppercase text-slate-400 tracking-widest">Diagnostic Output</h3>
+            {!result ? (
+              <Card className="p-8 h-full bg-slate-50 border-dashed border-2 flex flex-col items-center justify-center text-slate-400 opacity-60">
+                <Search size={32} className="mb-2" />
+                <p className="text-xs font-bold text-center">Enter data to begin analysis</p>
+              </Card>
+            ) : (
+              <Card className="p-6 bg-white shadow-2xl animate-in zoom-in-95 border-t-4 border-slate-900">
+                <div className="flex flex-col items-center text-center space-y-4">
+                  <div className="w-16 h-16 flex items-center justify-center rounded-full bg-slate-50">
+                    {result.status === 'COMPATIBLE' && <CheckCircle2 size={36} className="text-emerald-500" />}
+                    {result.status === 'UPGRADE_REQUIRED' && <ArrowUpCircle size={36} className="text-amber-500" />}
+                    {result.status === 'UNTESTED_STACK' && <Info size={36} className="text-blue-500" />}
+                    {result.status === 'NOT_VERIFIED' && <AlertTriangle size={36} className="text-rose-500" />}
+                  </div>
+                  
+                  <div>
+                    <Badge variant={result.status === 'COMPATIBLE' ? 'success' : result.status === 'UPGRADE_REQUIRED' ? 'warning' : result.status === 'UNTESTED_STACK' ? 'info' : 'danger'}>
+                      {result.status.replace('_', ' ')}
+                    </Badge>
+                    <p className="text-sm font-bold text-slate-800 mt-3 leading-tight">{result.message}</p>
+                  </div>
+
+                  <div className="w-full pt-4 border-t border-slate-100 text-left space-y-4">
+                    {result.details && (
+                      <ul className="text-[10px] space-y-1">
+                        {result.details.map((d, i) => (
+                          <li key={i} className="text-rose-500 font-bold flex items-center gap-1"><Ban size={10} /> {d}</li>
+                        ))}
+                      </ul>
+                    )}
+                    <p className="text-xs font-bold text-blue-600 bg-blue-50 p-3 rounded-lg border border-blue-100">{result.resolution}</p>
+                    {(result.status === 'NOT_VERIFIED' || result.status === 'UNTESTED_STACK') && (
+                      <button onClick={handleRequestTest} className="w-full py-2 bg-slate-900 text-white text-[10px] font-black uppercase rounded-lg shadow-md flex items-center justify-center gap-2">
+                        <Send size={12} /> Request Lab Validation
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </Card>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const TestQueueView = () => {
+    const drafts = tests.filter(t => t.status === TEST_STATUS.DRAFT);
+    const [activeTest, setActiveTest] = useState(null);
+    const [log, setLog] = useState({ result: 'PASS', notes: '', tester: '' });
+    const [stack, setStack] = useState({ android: '', ios: '', blocks: '', ide: '', joystick: '' });
+
+    useEffect(() => {
+      if (activeTest) {
+        setStack({
+          android: activeTest.android || getLatest(CATEGORIES.ANDROID),
+          ios: activeTest.ios || getLatest(CATEGORIES.IOS),
+          blocks: activeTest.blocks || getLatest(CATEGORIES.BLOCKS),
+          ide: activeTest.ide || getLatest(CATEGORIES.IDE),
+          joystick: activeTest.joystick || getLatest(CATEGORIES.JOYSTICK)
+        });
+      }
+    }, [activeTest]);
+
+    if (activeTest) {
+      return (
+        <div className="max-w-4xl mx-auto space-y-6">
+          <Card className="p-8 space-y-8 shadow-2xl">
+            <header className="flex justify-between items-start border-b pb-4">
+              <div>
+                <h2 className="text-2xl font-black">Lab Validation Session</h2>
+                <p className="text-sm text-slate-500">Record verification findings for the ecosystem.</p>
+              </div>
+              <button onClick={() => setActiveTest(null)} className="p-2 hover:bg-slate-100 rounded-full"><X size={24}/></button>
+            </header>
+            
+            <div className="p-5 bg-slate-900 text-white rounded-xl flex justify-between items-center shadow-lg">
+              <div>
+                <p className="text-[10px] font-black uppercase opacity-50 tracking-widest">Configuration</p>
+                <p className="font-bold text-xl">{activeTest.hardware} + {activeTest.firmware}</p>
+              </div>
+              <Badge variant="purple">Engineering Auth</Badge>
+            </div>
+
+            <div className="grid grid-cols-2 gap-10">
+              <div className="space-y-6">
+                <h4 className="text-xs font-black uppercase text-slate-400 tracking-widest flex items-center gap-2"><Smartphone size={14} /> Software Stack Used</h4>
+                <div className="grid grid-cols-1 gap-3">
+                  {Object.keys(stack).map(key => (
+                    <div key={key} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase">{key}</label>
+                      <input className="text-xs font-black text-slate-800 bg-transparent text-right outline-none" value={stack[key]} onChange={e => setStack({...stack, [key]: e.target.value})} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-6">
+                <h4 className="text-xs font-black uppercase text-slate-400 tracking-widest flex items-center gap-2"><FileText size={14} /> Result Data</h4>
+                <div className="flex gap-4">
+                  {['PASS', 'FAIL'].map(r => (
+                    <button key={r} onClick={() => setLog({...log, result: r})} className={`flex-1 py-6 rounded-2xl font-black text-xl border-4 transition-all ${log.result === r ? (r === 'PASS' ? 'bg-emerald-50 border-emerald-600 text-white shadow-lg' : 'bg-rose-50 border-rose-600 text-white shadow-lg') : 'bg-white border-slate-100 text-slate-300'}`}>{r}</button>
+                  ))}
+                </div>
+                <div className="space-y-4 pt-4">
+                  <input type="text" className="w-full p-4 border rounded-xl font-bold" value={log.tester} onChange={e => setLog({...log, tester: e.target.value})} placeholder="Engineer ID" />
+                  <textarea className="w-full p-4 border rounded-xl h-24" value={log.notes} onChange={e => setLog({...log, notes: e.target.value})} placeholder="Detailed observations..." />
+                </div>
+              </div>
+            </div>
+
+            <button onClick={() => { submitTestResult(activeTest.id, log.result, log.notes, log.tester, stack); setActiveTest(null); }} className="w-full py-5 bg-blue-600 text-white font-black rounded-2xl shadow-xl uppercase tracking-widest hover:bg-blue-700 transition-all">Submit Full-Stack Validation</button>
+          </Card>
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-6">
+        <header>
+          <h1 className="text-2xl font-bold">Lab Queue</h1>
+          <p className="text-slate-500 text-sm">Configs awaiting full-stack validation.</p>
+        </header>
+
+        {drafts.length === 0 ? (
+          <div className="p-20 text-center text-slate-300 border-2 border-dashed rounded-3xl bg-slate-50/50">
+             <FlaskConical size={64} className="mx-auto mb-4 opacity-10" />
+             <p className="font-black">Queue Synchronized</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-3 gap-6">
+            {drafts.map(test => (
+              <Card key={test.id} className="p-6 group hover:border-blue-500 cursor-pointer relative" onClick={() => setActiveTest(test)}>
+                <Badge variant={test.isAutoGenerated ? 'purple' : 'default'}>{test.isAutoGenerated ? 'Requirement' : 'Escalation'}</Badge>
+                <h3 className="text-xl font-black mt-4 text-slate-900">{test.hardware}</h3>
+                <p className="text-blue-600 font-bold mb-6 text-sm">Target: Magis {test.firmware}</p>
+                <div className="flex items-center justify-between pt-4 border-t border-slate-50">
+                   <span className="text-[10px] font-mono font-bold text-slate-300 uppercase">ID: {test.id.slice(-8)}</span>
+                   <span className="text-[10px] font-black text-blue-500 group-hover:translate-x-1 transition-all uppercase">Verify Stack →</span>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const MatrixView = () => {
+    const verified = tests.filter(t => t.status === TEST_STATUS.APPROVED);
+    return (
+      <div className="space-y-6">
+        <header>
+          <h1 className="text-2xl font-bold">Ecosystem Matrix</h1>
+          <p className="text-slate-500 text-sm">Official verified configurations for all Pluto Ecosystem assets.</p>
+        </header>
+        <Card className="overflow-hidden shadow-2xl border-none">
+          <table className="w-full text-left">
+            <thead className="bg-slate-900 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+              <tr>
+                <th className="p-5 text-white">Board</th>
+                <th className="p-5 text-white">Firmware</th>
+                <th className="p-5">Android</th>
+                <th className="p-5">Blocks</th>
+                <th className="p-5">IDE</th>
+                <th className="p-5 text-right">Signoff</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y text-sm bg-white">
+              {verified.map(t => (
+                <tr key={t.id} className="hover:bg-slate-50 transition-colors">
+                  <td className="p-5 font-black text-slate-900">{t.hardware}</td>
+                  <td className="p-5 font-bold text-blue-600">Magis {t.firmware}</td>
+                  <td className="p-5 text-slate-500">{t.android || '—'}</td>
+                  <td className="p-5 text-slate-500">{t.blocks || '—'}</td>
+                  <td className="p-5 text-slate-500">{t.ide || '—'}</td>
+                  <td className="p-5 text-right">
+                    <div className="flex flex-col items-end">
+                      <span className="text-[10px] font-black text-emerald-600 uppercase flex items-center gap-1"><Check size={12}/> {t.tester}</span>
+                      <span className="text-[9px] text-slate-300 font-bold">{new Date(t.approvedAt).toLocaleDateString()}</span>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      </div>
+    );
+  };
+
+  const DashboardView = () => {
+    const stats = {
+      pending: tests.filter(t => t.status === TEST_STATUS.SUBMITTED).length,
+      verified: tests.filter(t => t.status === TEST_STATUS.APPROVED).length,
+      staging: versions.filter(v => v.category === CATEGORIES.FIRMWARE && !v.isReleased).length,
+    };
+
+    return (
+      <div className="space-y-10 animate-in fade-in duration-500">
+        <header className="flex justify-between items-end">
+          <div>
+            <h1 className="text-4xl font-black text-slate-900 tracking-tight">Ecosystem Hub</h1>
+            <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest mt-1">Multi-Stack Intelligence System</p>
+          </div>
+          <Badge variant="purple">V3.0.2 Stable</Badge>
+        </header>
+
+        <div className="grid grid-cols-3 gap-8">
+          <Card className="p-8 bg-slate-900 text-white border-none shadow-2xl">
+            <h3 className="text-xs font-bold opacity-50 uppercase tracking-widest mb-1">Matrix Verified</h3>
+            <p className="text-5xl font-black">{stats.verified}</p>
+            <div className="mt-6 flex items-center gap-2 text-blue-400 font-bold text-xs"><Activity size={16} /> Verified Stack Configurations</div>
+          </Card>
+          <Card className="p-8 border-l-4 border-amber-500">
+            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Awaiting Signoff</h3>
+            <p className="text-5xl font-black text-slate-900">{stats.pending}</p>
+            <div onClick={() => setCurrentPage('approval')} className="mt-6 text-amber-600 font-bold text-xs flex items-center gap-1 cursor-pointer hover:underline">Verify results <ChevronRight size={14} /></div>
+          </Card>
+          <Card className="p-8 border-l-4 border-blue-500">
+            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Staging Builds</h3>
+            <p className="text-5xl font-black text-slate-900">{stats.staging}</p>
+            <div onClick={() => setCurrentPage('release')} className="mt-6 text-blue-600 font-bold text-xs flex items-center gap-1 cursor-pointer hover:underline">Check gatekeepers <ChevronRight size={14} /></div>
+          </Card>
+        </div>
+
+        <div className="grid grid-cols-2 gap-10">
+          <Card className="overflow-hidden shadow-lg">
+            <div className="p-5 border-b bg-slate-50 font-black text-[10px] uppercase text-slate-500 tracking-widest">
+              Live Verification Feed
+            </div>
+            <div className="divide-y max-h-[400px] overflow-y-auto">
+               {tests.sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 10).map(t => (
+                 <div key={t.id} className="p-5 flex items-center justify-between hover:bg-slate-50">
+                    <div className="flex items-center gap-5">
+                      <div className={`w-2.5 h-2.5 rounded-full ${t.result === 'PASS' ? 'bg-emerald-500 shadow-sm shadow-emerald-200' : t.result === 'FAIL' ? 'bg-rose-500 shadow-sm' : 'bg-slate-200'}`} />
+                      <div>
+                        <p className="font-black text-slate-800 text-sm">{t.hardware} / {t.firmware}</p>
+                        <p className="text-[10px] text-slate-400 font-bold">Stack: {t.android ? 'Android '+t.android : ''} {t.blocks ? 'Blocks '+t.blocks : ''}</p>
+                      </div>
+                    </div>
+                    <Badge variant={t.status === TEST_STATUS.APPROVED ? 'success' : 'default'}>{t.status}</Badge>
+                 </div>
+               ))}
+            </div>
+          </Card>
+
+          <div className="space-y-8">
+            <Card className="p-8 bg-gradient-to-br from-blue-700 to-indigo-900 text-white border-none shadow-2xl">
+              <h3 className="font-black text-xl mb-3">Multi-Stack Release Guard</h3>
+              <p className="text-sm opacity-80 mb-8 leading-relaxed">Ensure production stability by gating releases until 100% of the hardware matrix passes validation with current tool versions.</p>
+              <button onClick={() => setCurrentPage('release')} className="w-full py-4 bg-white text-blue-700 font-black rounded-2xl shadow-xl hover:bg-blue-50">Manage Release Gate</button>
+            </Card>
+
+            <Card className="p-8 border-none shadow-lg">
+               <div className="flex items-center gap-4 mb-6">
+                 <div className="p-3 bg-emerald-50 rounded-2xl text-emerald-600 shadow-sm"><LifeBuoy size={24}/></div>
+                 <div>
+                   <h3 className="font-black text-lg">Support Intelligence</h3>
+                   <p className="text-xs text-slate-400 font-bold uppercase">Customer-facing Diagnostic Tool</p>
+                 </div>
+               </div>
+               <p className="text-sm text-slate-500 mb-6 leading-relaxed">Cross-reference customer device setups with the official engineering signoff matrix.</p>
+               <button onClick={() => setCurrentPage('support')} className="text-blue-600 font-black text-sm flex items-center gap-1 hover:underline">Launch Diagnostic Suite <ChevronRight size={18}/></button>
+            </Card>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const ApprovalQueueView = () => {
+    const pending = tests.filter(t => t.status === TEST_STATUS.SUBMITTED);
+    return (
+      <div className="space-y-6">
+        <header>
+          <h1 className="text-2xl font-bold">Signoff Pipeline</h1>
+          <p className="text-slate-500 text-sm">Lead Engineer verification of full-stack results.</p>
+        </header>
+        <div className="space-y-6">
+          {pending.length === 0 && <p className="text-center py-20 text-slate-300 font-bold italic">No submissions awaiting signoff.</p>}
+          {pending.map(test => (
+            <Card key={test.id} className="flex flex-col md:flex-row overflow-hidden border-none shadow-xl">
+               <div className={`w-36 flex flex-col items-center justify-center font-black ${test.result === 'PASS' ? 'bg-emerald-500 text-white' : 'bg-rose-500 text-white'}`}>
+                 <span className="text-2xl">{test.result}</span>
+                 <span className="text-[10px] opacity-60 uppercase">Result</span>
+               </div>
+               <div className="p-8 flex-1 flex flex-col md:flex-row justify-between items-center bg-white">
+                  <div className="flex-1 space-y-4">
+                    <h3 className="text-xl font-black text-slate-900">{test.hardware} / Magis {test.firmware}</h3>
+                    <div className="grid grid-cols-4 gap-3">
+                       <div className="bg-slate-50 p-2 rounded-lg"><p className="text-[9px] font-black text-slate-400 uppercase">Android</p><p className="text-xs font-bold">{test.android || '—'}</p></div>
+                       <div className="bg-slate-50 p-2 rounded-lg"><p className="text-[9px] font-black text-slate-400 uppercase">Blocks</p><p className="text-xs font-bold">{test.blocks || '—'}</p></div>
+                       <div className="bg-slate-50 p-2 rounded-lg"><p className="text-[9px] font-black text-slate-400 uppercase">IDE</p><p className="text-xs font-bold">{test.ide || '—'}</p></div>
+                       <div className="bg-slate-50 p-2 rounded-lg"><p className="text-[9px] font-black text-slate-400 uppercase">Joy</p><p className="text-xs font-bold">{test.joystick || '—'}</p></div>
+                    </div>
+                    <div className="p-4 bg-amber-50 rounded-xl text-sm italic text-amber-700 border border-amber-100">"{test.notes || 'No detailed observations provided.'}"</div>
+                  </div>
+                  <div className="flex gap-4 ml-8">
+                    <button onClick={() => approveTest(test.id, false)} className="px-6 py-3 text-rose-500 font-black text-xs uppercase hover:bg-rose-50 rounded-xl">Reject</button>
+                    <button onClick={() => approveTest(test.id, true)} className="bg-slate-900 text-white px-10 py-3 rounded-xl font-black text-xs uppercase shadow-xl hover:bg-blue-600 transition-all">Signoff</button>
+                  </div>
+               </div>
+            </Card>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const ReleaseGuardrailView = () => {
+    const stagingFirmware = versions.filter(v => v.category === CATEGORIES.FIRMWARE && !v.isReleased);
+    return (
+      <div className="space-y-6">
+        <header>
+          <h1 className="text-2xl font-bold">Release Guard</h1>
+          <p className="text-slate-500 text-sm font-medium">Gating production releases based on multi-stack coverage.</p>
+        </header>
+        <div className="space-y-8">
+          {stagingFirmware.length === 0 ? (
+            <Card className="p-16 text-center text-slate-300 bg-white border-dashed border-2">
+               <Rocket size={48} className="mx-auto mb-4 opacity-10" />
+               <h3 className="text-lg font-bold">Ecosystem Production Synchronized</h3>
+            </Card>
+          ) : (
+            stagingFirmware.map(fw => {
+              const reqHardware = versions.filter(v => v.category === CATEGORIES.HARDWARE);
+              const approvedTests = tests.filter(t => t.firmware === fw.name && t.status === TEST_STATUS.APPROVED);
+              const progress = Math.round((approvedTests.length / reqHardware.length) * 100);
+              const isReady = progress === 100;
+
+              return (
+                <Card key={fw.id} className="p-10 shadow-2xl">
+                  <div className="flex justify-between items-center mb-10">
+                    <div>
+                      <h2 className="text-3xl font-black text-slate-900">Magis {fw.name}</h2>
+                      <Badge variant="warning">Staging Validation</Badge>
+                    </div>
+                    {isReady ? (
+                      <button onClick={() => markFirmwareReleased(fw.id)} className="bg-emerald-600 text-white px-10 py-4 rounded-2xl font-black shadow-xl hover:bg-emerald-700 uppercase text-xs tracking-widest">
+                        <Rocket size={20} className="inline mr-2" /> Mark Official Release
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-3 bg-rose-50 px-8 py-4 rounded-2xl border border-rose-100 shadow-sm">
+                         <Ban size={20} className="text-rose-500" />
+                         <span className="text-sm font-black text-rose-700 uppercase">Blocked: Matrix Coverage {progress}%</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mb-10">
+                    <div className="flex justify-between text-[10px] font-black text-slate-400 mb-3 uppercase tracking-widest">
+                      <span>Multi-Stack Readiness Index</span>
+                      <span>{progress}%</span>
+                    </div>
+                    <div className="w-full bg-slate-100 h-4 rounded-full overflow-hidden shadow-inner border border-slate-50 p-1">
+                      <div className="bg-blue-600 h-full rounded-full transition-all duration-1000 shadow-md" style={{ width: `${progress}%` }} />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-6">
+                    {reqHardware.map(hw => {
+                      const test = tests.find(t => t.hardware === hw.name && t.firmware === fw.name);
+                      const status = test?.status || 'MISSING';
+                      return (
+                        <div key={hw.id} className={`p-6 rounded-2xl border flex flex-col justify-between h-36 ${status === TEST_STATUS.APPROVED ? 'bg-emerald-50 border-emerald-100 shadow-sm' : 'bg-slate-50 border-slate-200 opacity-60'}`}>
+                          <p className="text-sm font-black text-slate-900">{hw.name}</p>
+                          <Badge variant={status === TEST_STATUS.APPROVED ? 'success' : 'default'}>{status === TEST_STATUS.APPROVED ? 'Verified' : 'Pending'}</Badge>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </Card>
+              );
+            })
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  if (loading) return (
+    <div className="h-screen flex flex-col items-center justify-center font-black text-slate-200 bg-slate-900">
+      <Zap size={64} className="animate-pulse mb-6 text-blue-500 shadow-2xl" />
+      <span className="text-3xl animate-pulse tracking-tighter uppercase">Initializing Ecosystem</span>
+    </div>
+  );
+
+  return (
+    <div className="flex h-screen bg-slate-50 text-slate-900 font-sans antialiased overflow-hidden">
+      <Sidebar />
+      <main className="flex-1 overflow-y-auto p-12 relative">
+        {notification && (
+          <div className="fixed top-8 right-8 z-50 animate-in slide-in-from-top-4 bg-slate-900 text-white px-10 py-5 rounded-2xl shadow-2xl flex items-center gap-5 border border-slate-700">
+            <CheckCircle2 size={24} className="text-emerald-400" /> 
+            <span className="text-sm font-black tracking-tight">{notification}</span>
+          </div>
+        )}
+        <div className="max-w-[1500px] mx-auto pb-20">
+          {currentPage === 'dashboard' && <DashboardView />}
+          {currentPage === 'support' && <SupportView />}
+          {currentPage === 'release' && <ReleaseGuardrailView />}
+          {currentPage === 'submit' && <TestQueueView />}
+          {currentPage === 'approval' && <ApprovalQueueView />}
+          {currentPage === 'matrix' && <MatrixView />}
+          {currentPage === 'manage' && (
+            <div className="space-y-12">
+              <header>
+                <h1 className="text-3xl font-black text-slate-900">Ecosystem Registry</h1>
+                <p className="text-slate-500 font-bold uppercase text-xs tracking-widest mt-1">Manage hardware, firmware, and tool versions.</p>
+              </header>
+
+              <Card className="p-10 shadow-2xl bg-white border-none">
+                <h2 className="font-black mb-8 uppercase text-slate-400 tracking-widest text-xs border-b pb-4">Register New Ecosystem Component</h2>
+                <div className="flex flex-col md:flex-row gap-6">
+                  <input id="newAssetName" type="text" className="flex-1 p-5 border rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 font-black text-lg" placeholder="e.g. 3.0.4" />
+                  <select id="newAssetCat" className="p-5 border rounded-2xl bg-white font-black text-slate-600 outline-none focus:ring-2 focus:ring-blue-500">
+                    {Object.values(CATEGORIES).map(c => <option key={c}>{c}</option>)}
+                  </select>
+                  <button onClick={() => {
+                    const n = document.getElementById('newAssetName').value;
+                    const c = document.getElementById('newAssetCat').value;
+                    if(n) { addVersion(n, c); document.getElementById('newAssetName').value = ''; }
+                  }} className="bg-slate-900 text-white px-12 py-5 font-black rounded-2xl hover:bg-slate-800 transition-all shadow-2xl uppercase text-xs tracking-widest">
+                    Add to Registry
+                  </button>
+                </div>
+              </Card>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 pb-20">
+                {Object.values(CATEGORIES).map(cat => (
+                  <Card key={cat} className="p-0 overflow-hidden shadow-xl border-none bg-white">
+                    <div className="p-6 bg-slate-900 text-white font-black text-[10px] uppercase tracking-widest flex justify-between items-center">
+                       <span>{cat} Registry</span>
+                       <Badge variant="purple">{versions.filter(v => v.category === cat).length}</Badge>
+                    </div>
+                    <div className="divide-y max-h-80 overflow-y-auto">
+                      {versions.filter(v => v.category === cat).sort((a,b) => b.name.localeCompare(a.name, undefined, {numeric:true})).map(v => (
+                        <div key={v.id} className="p-5 text-sm flex justify-between items-center group hover:bg-slate-50 transition-colors">
+                          <span className="font-black text-slate-800 tracking-tight">{v.name}</span>
+                          <div className="flex gap-2 items-center">
+                             {cat === CATEGORIES.FIRMWARE && (
+                               v.isReleased ? <Badge variant="success">Official</Badge> : <Badge variant="warning">Staging</Badge>
+                             )}
+                             <button onClick={async () => await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'versions', v.id))} className="text-slate-200 hover:text-rose-500 p-2 opacity-0 group-hover:opacity-100 transition-all">
+                               <X size={16}/>
+                             </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </main>
+    </div>
+  );
+}
